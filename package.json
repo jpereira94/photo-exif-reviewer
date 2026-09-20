@@ -1,0 +1,19 @@
+{
+  "name": "photo-exif-reviewer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Aplicação local para rever fotografias e respetivos dados EXIF.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "exiftool-vendored": "^38.1.0",
+    "express": "^5.1.0",
+    "sharp": "^0.35.4",
+    "trash": "^10.0.0"
+  }
+}

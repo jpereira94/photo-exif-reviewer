@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="pt">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo EXIF Reviewer</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">Ferramenta local</p>
+        <h1>Photo EXIF Reviewer</h1>
+      </div>
+      <button id="choose-folder" class="primary" type="button">Escolher pasta</button>
+    </header>
+
+    <main>
+      <section id="welcome" class="welcome">
+        <div class="welcome-icon" aria-hidden="true">⌗</div>
+        <h2>Escolhe uma pasta de fotografias</h2>
+        <p>A app mostra ficheiros JPG e JPEG, lê os dados EXIF e permite mover as fotografias rejeitadas para o Lixo.</p>
+        <button id="welcome-choose-folder" class="primary" type="button">Escolher pasta</button>
+        <form id="path-form">
+          <label for="folder-path">Ou cola o caminho da pasta</label>
+          <div class="path-row">
+            <input id="folder-path" name="path" type="text" placeholder="/Users/nome/Pictures/fotografias" autocomplete="off">
+            <button type="submit">Abrir</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="reviewer" class="reviewer" hidden>
+        <div class="toolbar">
+          <div class="folder-details">
+            <span id="folder-name"></span>
+            <span id="counter"></span>
+          </div>
+          <div class="toolbar-actions">
+            <button id="selected-only" type="button" aria-pressed="false" disabled>Só selecionadas</button>
+            <button id="compare" type="button" aria-pressed="false" disabled>Comparar</button>
+            <button id="previous" type="button" aria-label="Fotografia anterior">← Anterior</button>
+            <button id="next" type="button" aria-label="Fotografia seguinte">Seguinte →</button>
+            <button id="delete" class="danger" type="button">Mover para o Lixo</button>
+          </div>
+        </div>
+
+        <div class="content">
+          <div class="photo-stage">
+            <div id="loading" class="loading" hidden>A carregar…</div>
+            <img id="photo" alt="Fotografia atual">
+          </div>
+
+          <div id="comparison" class="comparison" hidden></div>
+
+          <aside>
+            <h2>Dados EXIF</h2>
+            <dl id="metadata"></dl>
+            <div class="shortcuts">
+              <h3>Atalhos</h3>
+              <p><kbd>←</kbd> Anterior</p>
+              <p><kbd>→</kbd> Seguinte</p>
+              <p><kbd>Delete</kbd> Mover para o Lixo</p>
+            </div>
+          </aside>
+        </div>
+
+        <section class="thumbnails-section" aria-label="Todas as fotografias">
+          <div class="thumbnails-header">
+            <div>
+              <h2>Todas as fotografias</h2>
+              <span id="selection-count">Nenhuma selecionada</span>
+            </div>
+            <button id="clear-selection" type="button" disabled>Limpar seleção</button>
+          </div>
+          <div id="thumbnails" class="thumbnails"></div>
+        </section>
+      </section>
+
+      <section id="empty" class="welcome" hidden>
+        <h2>Não há fotografias nesta pasta</h2>
+        <p>Escolhe outra pasta ou adiciona ficheiros JPG/JPEG.</p>
+        <button id="empty-choose-folder" class="primary" type="button">Escolher outra pasta</button>
+      </section>
+    </main>
+
+    <dialog id="zoom-viewer" aria-label="Visualizador da fotografia original">
+      <div class="zoom-toolbar">
+        <div>
+          <strong id="zoom-filename"></strong>
+          <span id="zoom-help">Roda para ampliar · arrasta para mover · duplo clique para 100%</span>
+        </div>
+        <div class="zoom-actions">
+          <button id="zoom-out" type="button" aria-label="Reduzir zoom">−</button>
+          <span id="zoom-level">100%</span>
+          <button id="zoom-in" type="button" aria-label="Aumentar zoom">+</button>
+          <button id="zoom-fit" type="button">Ajustar</button>
+          <button id="zoom-close" type="button">Fechar</button>
+        </div>
+      </div>
+      <div id="zoom-stage" class="zoom-stage">
+        <div id="zoom-loading" class="loading">A carregar original…</div>
+        <img id="zoom-image" alt="" draggable="false">
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
