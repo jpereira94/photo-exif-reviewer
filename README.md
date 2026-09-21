@@ -4,8 +4,8 @@ Pequena aplicação local para macOS que permite escolher uma pasta, rever fotog
 
 ## Requisitos
 
-- macOS
-- Node.js 18 ou superior
+- macOS em Apple Silicon
+- Node.js 20.9 ou superior (exigido pelo `sharp`), necessário para construir; a app instalada já traz o seu
 
 Não é necessário instalar o `exiftool` através do Homebrew: a dependência `exiftool-vendored` instala e utiliza uma versão própria do ExifTool.
 
@@ -105,7 +105,26 @@ Na pasta do projeto, executa:
 npm install
 ```
 
-## Executar
+## Instalar como app do macOS
+
+```bash
+npm run build:app
+```
+
+Isto gera `dist/Photo EXIF Reviewer.app`. Arrasta-a para a pasta **Aplicações** e abre como qualquer outra app. Volta a correr o comando sempre que mexeres no código.
+
+A app é uma janela nativa em `WKWebView` — usa o WebKit do sistema, não traz um segundo motor de browser — e arranca por dentro o servidor Node que está empacotado com ela. Por isso:
+
+- **não precisa do Node instalado** para correr. O runtime vai dentro do pacote, o que aqui é indispensável: este Mac tem o Node no `nvm`, e uma app lançada pelo Finder não herda o `PATH` da shell, logo não encontraria o `node` do sistema;
+- **escolhe uma porta livre** a cada arranque, em vez da 4173 fixa, e só carrega a página quando o servidor responde;
+- **não deixa processos pendentes**: ao sair, manda `SIGTERM` ao servidor para o `exiftool` fechar em condições, e mata-o se não sair em meio segundo;
+- usa o **painel de pastas nativo** do macOS em vez do `osascript`, através de uma ponte do `WKWebView`. No modo browser (`npm start`) a ponte não existe e continua a usar-se o `osascript`.
+
+Como é construída no teu Mac, **não fica em quarentena** e não aparecem os avisos do Gatekeeper. Vai assinada ad-hoc (`codesign --sign -`), que é o necessário para o macOS aceitar binários arm64 alterados depois de compilados.
+
+Duas limitações a saber: a app pesa cerca de **184 MB** (106 MB só do runtime Node) e é **exclusiva de Apple Silicon** — o runtime, a janela, o auxiliar Vision e o binário do `sharp` são todos arm64. Para um Mac Intel teria de ser reconstruída nessa máquina.
+
+## Executar sem instalar
 
 ```bash
 npm start

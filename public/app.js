@@ -661,11 +661,37 @@ function setFolder(data) {
   }
 }
 
+// Dentro da app empacotada o seletor é o painel nativo do macOS, através da
+// ponte do WKWebView. No browser (npm start) essa ponte não existe e usa-se o
+// osascript do servidor.
+function openPanelBridge() {
+  return window.webkit?.messageHandlers?.chooseFolder ?? null;
+}
+
 async function chooseFolder() {
   setFolderLoading(true);
 
   try {
-    setFolder(await request("/api/select-folder"));
+    const bridge = openPanelBridge();
+
+    if (!bridge) {
+      setFolder(await request("/api/select-folder"));
+      return;
+    }
+
+    const chosen = await bridge.postMessage({});
+
+    if (!chosen) {
+      return;
+    }
+
+    setFolder(
+      await request("/api/folder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: chosen }),
+      }),
+    );
   } catch (error) {
     if (error.message !== "Seleção cancelada.") {
       showToast(error.message, true);
