@@ -22,15 +22,39 @@ Estes ficheiros são guardados na pasta temporária do macOS, organizados por pa
 
 Depois de preparar as imagens, a app analisa cada fotografia em segundo plano (o estado aparece por baixo do caminho da pasta) e produz duas coisas.
 
-**Grupos de fotografias parecidas.** Rajadas e enquadramentos repetidos são reunidos num grupo, para poderes escolher a melhor de cada um em vez de percorreres tudo. O agrupamento cruza sempre a hora de captura do EXIF com uma medida de semelhança visual: fotografias a menos de 2,5 s umas das outras são tratadas como rajada (critério mais tolerante) e até 3 minutos de intervalo como a mesma cena (critério mais apertado). Passados 3 minutos não há agrupamento, por mais parecidas que sejam.
+**Grupos de fotografias parecidas.** Rajadas e enquadramentos repetidos são reunidos num grupo, para poderes escolher a melhor de cada um em vez de percorreres tudo. O agrupamento cruza sempre a hora de captura do EXIF com uma medida de semelhança visual: só são comparadas fotografias a menos de 3 minutos umas das outras. Passado esse intervalo não há agrupamento, por mais parecidas que sejam.
 
-A medida de semelhança vem do framework **Vision** do macOS. Para cada fotografia é extraído um vetor de características de 768 dimensões a partir do preview já em cache, e duas fotografias são parecidas se a distância euclidiana entre os vetores for pequena. É um modelo de visão do sistema e corre na Neural Engine. Na mesma passagem saem também a pontuação estética, a qualidade dos rostos, o ângulo do horizonte e a caixa do assunto, tudo com um só pedido por imagem: cerca de 10 ms por fotografia.
+A medida de semelhança vem do framework **Vision** do macOS. Para cada fotografia é extraído um vetor de características de 768 dimensões a partir do preview já em cache, e duas fotografias são parecidas se a distância euclidiana entre os vetores for pequena.
 
-A vantagem sobre um hash percetual é concreta: o hash é um descritor global da *imagem*, e basta o assunto mudar de sítio no enquadramento para ele deixar de reconhecer a cena. Em duas fotografias do mesmo avião a rolar na pista, com o avião deslocado cerca de 10% da largura do enquadramento, o dHash dá uma distância de Hamming de 30 (o limite para "mesma cena" é 10, portanto não agrupava) enquanto o vetor do Vision dá 0,24 — bem dentro do limite.
+O vetor é extraído com `imageCropAndScaleOption = .centerCrop`, ou seja, de um quadrado no centro da imagem. Isto é essencial para a orientação: com a omissão (`.scaleFill`, que espreme a imagem inteira para um quadrado) a mesma cena fotografada na horizontal e na vertical dá distâncias de 0,53 a 0,56, e não agrupa. Com `centerCrop` as mesmas fotografias descem para 0,31 a 0,37. A opção só se aplica ao vetor de semelhança — os restantes pedidos precisam da imagem inteira. É um modelo de visão do sistema e corre na Neural Engine. Na mesma passagem saem também a pontuação estética, a qualidade dos rostos, o ângulo do horizonte e a caixa do assunto, tudo com um só pedido por imagem: cerca de 10 ms por fotografia.
+
+A vantagem sobre um hash percetual é concreta: o hash é um descritor global da *imagem*, e basta o assunto mudar de sítio no enquadramento para ele deixar de reconhecer a cena. Em duas fotografias do mesmo avião a rolar na pista, com o avião deslocado cerca de 10% da largura do enquadramento, o dHash dá uma distância de Hamming de 30 (o limite para "mesma cena" é 10, portanto não agrupava) enquanto o vetor do Vision dá 0,32 — bem dentro do limite.
 
 Sem o auxiliar Vision, o agrupamento recorre ao *perceptual hash* (dHash): fotografias quase idênticas continuam a ser agrupadas, mas casos com o assunto em movimento passam ao lado. Numa imagem sem estrutura de grande escala (céu liso, nevoeiro, parede) o hash também não distingue cenas, e aí só a proximidade temporal agrupa. O estado por baixo do caminho da pasta diz qual dos dois está em uso.
 
-> **Os limiares de distância do Vision são provisórios.** Estão fixados em 0,6 para rajadas e 0,35 para a mesma cena, calibrados contra um único par real conhecido (0,24) e um par não relacionado (~1,28). Faltam pares negativos reais de uma biblioteca de verdade para os afinar. Se vires fotografias diferentes a cair no mesmo grupo, ou pares óbvios a ficarem de fora, são estes os dois números a mexer, em `analysis.js`.
+O limiar está em **0,42**, em `analysis.js`. Foi calibrado sobre três cenas reais do mesmo aeroporto, com a mesma luz e a poucos minutos de intervalo: um avião em plano próximo, dois aviões a rolar (cena fotografada na horizontal e na vertical) e um avião a descolar.
+
+| | distância |
+|---|---|
+| dentro da mesma cena, máximo | **0,3732** (a mesma cena na horizontal vs na vertical) |
+| entre cenas diferentes, **mínimo** | **0,4848** (descolagem vs rolagem) |
+| entre cenas visualmente distantes | 0,79 – 0,95 |
+
+A margem é estreita, e o par que a define é instrutivo: descolagem e rolagem partilham o enquadramento, o fundo, a luz e o tipo de assunto, e ficam a 0,48 — quase tão perto como duas fotografias da mesma cena. O limiar está deliberadamente **abaixo** do meio da folga, porque as duas falhas não custam o mesmo: como o agrupamento é transitivo, um falso positivo funde dois grupos inteiros, enquanto um falso negativo apenas deixa um par por juntar.
+
+Não há um limiar mais tolerante para rajadas. As janelas de tempo decidem *se* duas fotografias chegam a ser comparadas — passados 3 minutos não há agrupamento — mas não mexem no quão parecidas têm de ser: nada do que medi sustenta ser mais permissivo dentro de uma rajada.
+
+A amostra continua pequena (8 fotografias, 3 grupos), e por isso o limiar está exposto na barra de ferramentas em **Agrupar**, com três níveis:
+
+| nível | limiar | efeito |
+|---|---|---|
+| Apertado | 0,34 | Abaixo do máximo medido dentro da mesma cena. Só junta o que é claramente igual |
+| **Normal** | **0,42** | O calibrado |
+| Solto | 0,52 | Acima do 0,4848 de propósito: junta cenas distintas que partilhem enquadramento e luz |
+
+Mudar de nível **reagrupa sem reanalisar** — os vetores já estão calculados, só a comparação é refeita, por isso é instantâneo. Experimenta os três na tua pasta para ver qual corresponde ao teu critério.
+
+Vale a pena notar que o agrupamento é **transitivo**: no conjunto de teste, o Apertado dá os mesmos grupos que o Normal, porque as fotografias se ligam em cadeia (A–B, B–C) mesmo quando o par mais afastado do grupo está acima do limiar.
 
 **Pontuação de 0 a 100.** Combina componentes transparentes com o modelo de estética do Vision:
 
@@ -99,12 +123,13 @@ Para parar a aplicação, volta ao Terminal e pressiona `Ctrl+C`.
 
 1. Clica em **Escolher pasta** e seleciona no Finder a pasta com as fotografias. Também podes colar o caminho completo da pasta.
 2. Usa os botões **Anterior** e **Seguinte**, ou as teclas `←` e `→`.
-3. Usa as miniaturas na parte inferior para saltar diretamente para uma fotografia ou selecionar várias.
+3. Usa as miniaturas na parte inferior para saltar diretamente para uma fotografia ou selecionar várias, ou a tecla `Espaço` para selecionar e desselecionar a fotografia atual sem tirar as mãos do teclado.
 4. Com duas ou mais selecionadas, usa **Comparar** para as ver lado a lado.
 5. Usa **Só selecionadas** para fazer Anterior/Seguinte percorrer apenas a seleção.
 6. Faz duplo clique na fotografia principal ou numa fotografia em comparação para abrir o original em modo zoom. Usa a roda do rato para ampliar e arrasta para fazer pan.
 7. Usa **Mover para o Lixo** ou a tecla `Delete`/`Backspace` para rejeitar a fotografia atual. A app pede confirmação antes de mover os ficheiros.
 8. Usa **Ordenar** e **Só as melhores** para percorrer primeiro as candidatas com melhor pontuação. Ver a secção *Ajuda à escolha*.
+9. Usa **Agrupar** para apertar ou alargar o critério de semelhança, e **Grelha** para sobrepor a grelha dos terços à fotografia. A grelha é desenhada sobre a área realmente ocupada pela imagem, não sobre a caixa à volta, e a preferência fica guardada entre sessões.
 
 Ao mover um JPG/JPEG para o Lixo, a app procura na mesma pasta ficheiros RAW com o mesmo nome-base e move-os também. Por exemplo, ao eliminar `IMG_0123.JPG`, também será movido `IMG_0123.CR3`, se existir. A confirmação mostra os RAW encontrados antes da operação.
 

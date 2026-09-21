@@ -15,6 +15,7 @@ import {
   measureSubject,
   poolSize,
   readCache,
+  resolveSensitivity,
   runPool,
   scorePhoto,
   writeCache
@@ -294,7 +295,7 @@ async function analyseFolder(folderPath, cacheDirectory, token) {
   }
 }
 
-function composeAnalysis() {
+function composeAnalysis(sensitivity) {
   const scored = photos
     .map((photo) => {
       const entry = analysisEntries.get(photo.name);
@@ -315,7 +316,7 @@ function composeAnalysis() {
       };
     })
     .filter(Boolean);
-  const groups = buildGroups(scored);
+  const groups = buildGroups(scored, sensitivity);
   const result = {};
 
   scored.forEach((entry) => {
@@ -434,15 +435,18 @@ app.post('/api/folder', async (request, response) => {
   }
 });
 
-app.get('/api/analysis', (_request, response) => {
+app.get('/api/analysis', (request, response) => {
+  const sensitivity = resolveSensitivity(request.query.sensitivity);
+
   response.json({
+    sensitivity,
     running: analysisState.running,
     done: analysisState.done,
     total: analysisState.total,
     stage: analysisState.stage,
     similarity: similarityMode,
     error: analysisState.error,
-    photos: composeAnalysis()
+    photos: composeAnalysis(sensitivity)
   });
 });
 

@@ -20,6 +20,10 @@ func analisar(_ path: String) -> Medidas {
     let handler = VNImageRequestHandler(url: URL(fileURLWithPath: path), options: [:])
 
     let feature = VNGenerateImageFeaturePrintRequest()
+    // Quadrado do centro: sem isto, a mesma cena fotografada na horizontal e na
+    // vertical dá vetores muito afastados. Só se aplica ao vetor de semelhança —
+    // os restantes pedidos precisam da imagem inteira.
+    feature.imageCropAndScaleOption = .centerCrop
     let faces = VNDetectFaceCaptureQualityRequest()
     let horizon = VNDetectHorizonRequest()
     let saliency = VNGenerateAttentionBasedSaliencyImageRequest()

@@ -364,19 +364,39 @@ export function scorePhoto(measurements, exif, vision = {}) {
 const burstGapMs = 2500;
 const burstDistance = 18;
 const sceneGapMs = 180_000;
-const sceneDistance = 10;
 const sceneLookahead = 6;
 // Abaixo disto a imagem reduzida não tem estrutura suficiente para o hash
 // distinguir cenas: só agrupamos por proximidade temporal.
 const minimumStructure = 4;
 // Limiares para os vetores do Vision (distância euclidiana, 0 = idêntico).
-// PROVISÓRIOS: calibrados apenas contra um par real conhecido (duas fotografias
-// do mesmo avião a rolar, que dão 0,24) e um par não relacionado (~1,28). Faltam
-// pares negativos reais para os fixar com confiança.
-const visionBurstDistance = 0.6;
-const visionSceneDistance = 0.35;
+// Calibrados sobre três cenas reais do mesmo aeroporto, com a mesma luz: dois
+// aviões a rolar (incluindo a mesma cena na horizontal e na vertical), um avião
+// a descolar, e um avião em plano próximo. Dentro de cada cena as distâncias vão
+// até 0,37; o par diferente mais próximo — descolagem contra rolagem, que
+// partilham enquadramento e fundo — está a 0,48. O limiar fica entre os dois.
+// A margem é estreita, e é por isso que ele está abaixo do meio: um falso
+// positivo funde dois grupos inteiros (o agrupamento é transitivo), enquanto um
+// falso negativo apenas deixa um par por juntar.
+// Um só limiar: as medições não sustentam ser mais tolerante dentro de uma
+// rajada. As janelas de tempo continuam a decidir SE duas fotografias chegam a
+// ser comparadas — passados 3 minutos não há agrupamento — mas não mexem no
+// quão parecidas têm de ser.
+//
+// A margem entre o 0,3732 medido dentro da mesma cena e o 0,4848 entre cenas
+// diferentes é estreita, por isso o limiar é ajustável. O "solto" passa acima do
+// 0,4848 de propósito: junta cenas distintas que partilhem enquadramento e luz.
+export const sensitivityPresets = {
+  apertado: { vision: 0.34, hash: 8 },
+  normal: { vision: 0.42, hash: 10 },
+  solto: { vision: 0.52, hash: 13 }
+};
 
-export function buildGroups(entries) {
+export function resolveSensitivity(value) {
+  return sensitivityPresets[value] ? value : 'normal';
+}
+
+export function buildGroups(entries, sensitivity = 'normal') {
+  const limits = sensitivityPresets[resolveSensitivity(sensitivity)];
   const ordered = [...entries]
     .filter((entry) => entry.measurements)
     .sort((left, right) => (left.capturedAt ?? 0) - (right.capturedAt ?? 0) || left.name.localeCompare(right.name));
@@ -417,7 +437,7 @@ export function buildGroups(entries) {
       if (current.vector && other.vector) {
         const visionGap = featurePrintDistance(current.vector, other.vector);
 
-        if (visionGap <= (gap <= burstGapMs ? visionBurstDistance : visionSceneDistance)) {
+        if (visionGap <= limits.vision) {
           union(index, index + ahead);
         }
 
@@ -429,7 +449,7 @@ export function buildGroups(entries) {
 
       if (gap <= burstGapMs && (!reliableHash || distance <= burstDistance)) {
         union(index, index + ahead);
-      } else if (reliableHash && distance <= sceneDistance) {
+      } else if (reliableHash && distance <= limits.hash) {
         union(index, index + ahead);
       }
     }

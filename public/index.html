@@ -49,6 +49,25 @@
             <span id="analysis-status" class="analysis-status" hidden></span>
           </div>
           <div class="toolbar-actions">
+            <label class="toolbar-field" for="sensitivity">
+              <span>Agrupar</span>
+              <select
+                id="sensitivity"
+                title="Quão parecidas duas fotografias têm de ser para ficarem no mesmo grupo"
+              >
+                <option value="apertado">Apertado</option>
+                <option value="normal" selected>Normal</option>
+                <option value="solto">Solto</option>
+              </select>
+            </label>
+            <button
+              id="grid-toggle"
+              type="button"
+              aria-pressed="true"
+              title="Grelha dos terços sobre a fotografia"
+            >
+              Grelha
+            </button>
             <label class="toolbar-field" for="sort-mode">
               <span>Ordenar</span>
               <select id="sort-mode">
@@ -71,7 +90,7 @@
             <button id="compare" type="button" aria-pressed="false" disabled>
               Comparar
             </button>
-            <button
+            <!-- <button
               id="previous"
               type="button"
               aria-label="Fotografia anterior"
@@ -80,7 +99,7 @@
             </button>
             <button id="next" type="button" aria-label="Fotografia seguinte">
               Seguinte →
-            </button>
+            </button> -->
             <button id="delete" class="danger" type="button">
               Mover para o Lixo
             </button>
@@ -91,6 +110,12 @@
           <div class="photo-stage">
             <div id="loading" class="loading" hidden>A carregar…</div>
             <img id="photo" alt="Fotografia atual" />
+            <div id="thirds" class="thirds" aria-hidden="true" hidden>
+              <span class="thirds-line vertical" style="left: 33.3333%"></span>
+              <span class="thirds-line vertical" style="left: 66.6667%"></span>
+              <span class="thirds-line horizontal" style="top: 33.3333%"></span>
+              <span class="thirds-line horizontal" style="top: 66.6667%"></span>
+            </div>
           </div>
 
           <div id="comparison" class="comparison" hidden></div>
@@ -112,6 +137,7 @@
               <h3>Atalhos</h3>
               <p><kbd>←</kbd> Anterior</p>
               <p><kbd>→</kbd> Seguinte</p>
+              <p><kbd>Espaço</kbd> Selecionar para comparar</p>
               <p><kbd>Delete</kbd> Mover para o Lixo</p>
             </div>
           </aside>

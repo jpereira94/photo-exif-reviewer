@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 const appDirectory = path.dirname(fileURLToPath(import.meta.url));
 const helperPath = path.join(appDirectory, 'vision', 'featureprint');
 const cacheFileName = 'featureprints.json';
-const cacheVersion = 1;
+// v2: o vetor passou a ser extraído com centerCrop, e os vetores antigos não
+// são comparáveis com os novos.
+const cacheVersion = 2;
 // O vetor tem 768 floats normalizados; a distância euclidiana entre dois deles é
 // exatamente o que o computeDistance do Vision devolve.
 const expectedElements = 768;
