@@ -1,4 +1,5 @@
 node_modules/
 work/
 vision/featureprint
+native/trashitem
 dist/

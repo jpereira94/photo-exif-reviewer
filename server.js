@@ -28,6 +28,7 @@ import {
   readVectorCache,
   writeVectorCache
 } from './featureprint.js';
+import { restoreItem, trashItems } from './trashitem.js';
 
 const execFileAsync = promisify(execFile);
 const app = express();
@@ -44,6 +45,10 @@ let analysisToken = 0;
 let analysisState = { running: false, done: 0, total: 0, stage: null, error: null };
 let similarityMode = 'hash';
 const analysisEntries = new Map();
+// Cada apagar empilha o caminho de destino no Lixo de cada ficheiro movido, que
+// é o que permite repô-los. Limita-se para a pilha não crescer sem fim.
+const undoLimit = 30;
+let undoStack = [];
 const visionVectors = new Map();
 const visionMetrics = new Map();
 
@@ -361,6 +366,10 @@ async function loadFolder(folderPath) {
       stem: path.parse(entry.name).name.toLowerCase()
     }));
 
+  if (resolvedPath !== selectedFolder) {
+    undoStack = [];
+  }
+
   selectedFolder = resolvedPath;
   photos = entries
     .filter((entry) => entry.isFile() && supportedExtensions.has(path.extname(entry.name).toLowerCase()))
@@ -385,6 +394,7 @@ async function loadFolder(folderPath) {
   return {
     folder: selectedFolder,
     count: photos.length,
+    canUndo: undoStack.length > 0,
     photos: photos.map(clientPhoto)
   };
 }
@@ -522,7 +532,34 @@ app.delete('/api/photos/:index', async (request, response) => {
   }
 
   try {
-    await trash([photo.path, ...photo.rawFiles.map((rawFile) => rawFile.path)]);
+    const paths = [photo.path, ...photo.rawFiles.map((rawFile) => rawFile.path)];
+    const results = await trashItems(paths);
+
+    if (results) {
+      const failed = results.filter((result) => result.error);
+
+      if (failed.length) {
+        throw new Error(failed.map((result) => `${path.basename(result.path)}: ${result.error}`).join('; '));
+      }
+
+      const restorable = results
+        .filter((result) => result.trashed)
+        .map((result) => ({ from: result.trashed, to: result.path }));
+
+      if (restorable.length === paths.length) {
+        undoStack.push({ name: photo.name, items: restorable });
+        undoStack = undoStack.slice(-undoLimit);
+      } else {
+        // Sem o destino de todos os ficheiros, um anular deixaria o conjunto
+        // meio reposto; é melhor não o oferecer.
+        undoStack = [];
+      }
+    } else {
+      // Sem o auxiliar nativo, apaga-se como antes e não há como anular.
+      await trash(paths);
+      undoStack = [];
+    }
+
     await Promise.all([
       unlink(photo.thumbnailPath).catch(() => {}),
       unlink(photo.previewPath).catch(() => {})
@@ -537,6 +574,7 @@ app.delete('/api/photos/:index', async (request, response) => {
       deleted: photo.name,
       deletedRawFiles: photo.rawFiles.map((rawFile) => rawFile.name),
       count: photos.length,
+      canUndo: undoStack.length > 0,
       nextIndex: photos.length ? Math.min(photo.index, photos.length - 1) : null,
       photos: photos.map(clientPhoto)
     });
@@ -545,10 +583,55 @@ app.delete('/api/photos/:index', async (request, response) => {
   }
 });
 
+app.post('/api/undo', async (_request, response) => {
+  if (!undoStack.length) {
+    return response.status(400).json({ error: 'Não há nada para anular.' });
+  }
+
+  const entry = undoStack[undoStack.length - 1];
+
+  try {
+    // Validar tudo antes de mexer em qualquer ficheiro: uma reposição a meio
+    // seria pior do que não repor nada.
+    await Promise.all(entry.items.map(async (item) => {
+      await stat(item.from).catch(() => {
+        throw new Error(`${path.basename(item.to)} já não está no Lixo`);
+      });
+
+      const ocupado = await stat(item.to).then(() => true).catch(() => false);
+
+      if (ocupado) {
+        throw new Error(`já existe um ficheiro chamado ${path.basename(item.to)}`);
+      }
+    }));
+
+    for (const item of entry.items) {
+      await restoreItem(item.from, item.to);
+    }
+  } catch (error) {
+    return response.status(409).json({ error: `Não foi possível anular: ${error.message}` });
+  }
+
+  undoStack.pop();
+
+  // Recarregar a pasta regenera as derivadas do ficheiro reposto e volta a
+  // correr a análise; como o mtime é preservado, quase tudo vem da cache.
+  const folder = await loadFolder(selectedFolder);
+
+  response.json({
+    restored: entry.items.map((item) => path.basename(item.to)),
+    count: folder.count,
+    canUndo: undoStack.length > 0,
+    restoredIndex: photos.findIndex((item) => item.name === entry.name),
+    photos: folder.photos
+  });
+});
+
 app.get('/api/status', (_request, response) => {
   response.json({
     folder: selectedFolder,
     count: photos.length,
+    canUndo: undoStack.length > 0,
     photos: photos.map(clientPhoto)
   });
 });

@@ -32,7 +32,10 @@ func portaLivre() -> UInt16? {
     return UInt16(bigEndian: atribuido.sin_port)
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScriptMessageHandlerWithReply {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply {
+    // Em modo de auto-teste as caixas de diálogo respondem sem UI, para o
+    // encaminhamento poder ser verificado por linha de comandos.
+    private let autoTeste = CommandLine.arguments.contains("--self-test")
     private var janela: NSWindow!
     private var webView: WKWebView!
     private var servidor: Process?
@@ -63,6 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
         webView = WKWebView(frame: .zero, configuration: configuracao)
         webView.navigationDelegate = self
+        // Sem um WKUIDelegate o WKWebView não mostra alert/confirm/prompt: o
+        // confirm devolve false em silêncio e a app parecia ignorar o Delete.
+        webView.uiDelegate = self
+
+        if #available(macOS 13.3, *) {
+            webView.isInspectable = true
+        }
         webView.setValue(false, forKey: "drawsBackground")
 
         janela = NSWindow(
@@ -104,6 +114,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // Sem um menu Editar as teclas de cópia e colagem não chegam ao WebView.
         let itemEditar = NSMenuItem()
         let menuEditar = NSMenu(title: "Editar")
+        // O item de menu apanha o ⌘Z antes da página, por isso é ele que chama
+        // a mesma função de anular que o atalho usa no browser.
+        menuEditar.addItem(withTitle: "Anular apagar", action: #selector(anularApagar), keyEquivalent: "z")
+        menuEditar.addItem(.separator())
         menuEditar.addItem(withTitle: "Copiar", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         menuEditar.addItem(withTitle: "Colar", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         menuEditar.addItem(withTitle: "Selecionar tudo", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
@@ -111,6 +125,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         barra.addItem(itemEditar)
 
         NSApp.mainMenu = barra
+    }
+
+    // Verificação automática: antes desta correção o window.confirm devolvia
+    // false sem mostrar nada, e o Delete não apagava.
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard autoTeste else { return }
+
+        webView.evaluateJavaScript("window.confirm('teste de encaminhamento')") { resultado, erro in
+            if let erro {
+                print("AUTO-TESTE FALHOU: \(erro.localizedDescription)")
+            } else {
+                print("window.confirm devolveu: \(String(describing: resultado))")
+            }
+
+            NSApp.terminate(nil)
+        }
+    }
+
+    @objc private func anularApagar() {
+        webView.evaluateJavaScript("window.desfazerApagar && window.desfazerApagar()")
     }
 
     @objc private func recarregar() {
@@ -177,6 +211,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 }
             }
         }.resume()
+    }
+
+    // MARK: - Caixas de diálogo do JavaScript
+
+    private func caixa(_ mensagem: String, comCancelar: Bool) -> NSAlert {
+        let alerta = NSAlert()
+        // A primeira linha da mensagem é a pergunta; o resto é o detalhe.
+        let linhas = mensagem.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        alerta.messageText = linhas.first ?? mensagem
+        alerta.informativeText = linhas.dropFirst().joined(separator: "\n")
+        // Uma ação destrutiva merece um botão que diga o que faz, mas o rótulo
+        // não pode ficar preso a esse caso: qualquer outro confirm leva um
+        // "Confirmar" genérico.
+        let destrutivo = comCancelar && mensagem.contains("Lixo")
+        alerta.addButton(withTitle: destrutivo ? "Mover para o Lixo" : (comCancelar ? "Confirmar" : "OK"))
+
+        if comCancelar {
+            alerta.addButton(withTitle: "Cancelar")
+        }
+
+        return alerta
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping () -> Void
+    ) {
+        if autoTeste {
+            completionHandler()
+            return
+        }
+
+        caixa(message, comCancelar: false).beginSheetModal(for: janela) { _ in completionHandler() }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        if autoTeste {
+            print("confirm recebido pelo delegado: \(message.split(separator: "\n").first ?? "")")
+            completionHandler(true)
+            return
+        }
+
+        caixa(message, comCancelar: true).beginSheetModal(for: janela) { resposta in
+            completionHandler(resposta == .alertFirstButtonReturn)
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        if autoTeste {
+            completionHandler(defaultText)
+            return
+        }
+
+        let alerta = caixa(prompt, comCancelar: true)
+        let campo = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        campo.stringValue = defaultText ?? ""
+        alerta.accessoryView = campo
+        alerta.beginSheetModal(for: janela) { resposta in
+            completionHandler(resposta == .alertFirstButtonReturn ? campo.stringValue : nil)
+        }
     }
 
     // MARK: - Ponte do seletor de pastas

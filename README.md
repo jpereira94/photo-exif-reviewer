@@ -9,7 +9,7 @@ Pequena aplicação local para macOS que permite escolher uma pasta, rever fotog
 
 Não é necessário instalar o `exiftool` através do Homebrew: a dependência `exiftool-vendored` instala e utiliza uma versão própria do ExifTool.
 
-O agrupamento por semelhança visual usa o framework **Vision** do macOS, através de um pequeno auxiliar em Swift compilado durante o `npm install`. Não há modelos para descarregar — o modelo é o do sistema. Se as Command Line Tools não estiverem instaladas (`xcode-select --install`), a instalação não falha: o aviso é impresso e a app passa a agrupar apenas pelo hash percetual. Para compilar mais tarde, corre `npm run build:vision`.
+Há dois pequenos auxiliares em Swift, compilados durante o `npm install`: um usa o framework **Vision** do macOS para a semelhança visual e a pontuação estética (não há modelos para descarregar — o modelo é o do sistema), e o outro move ficheiros para o Lixo devolvendo o caminho de destino, que é o que torna possível anular. Se as Command Line Tools não estiverem instaladas (`xcode-select --install`), a instalação não falha: é impresso um aviso, o agrupamento passa a usar apenas o hash percetual e o Anular fica indisponível. Para compilar mais tarde, corre `npm run build:native`.
 
 Ao escolher uma pasta, a app gera automaticamente:
 
@@ -118,7 +118,16 @@ A app é uma janela nativa em `WKWebView` — usa o WebKit do sistema, não traz
 - **não precisa do Node instalado** para correr. O runtime vai dentro do pacote, o que aqui é indispensável: este Mac tem o Node no `nvm`, e uma app lançada pelo Finder não herda o `PATH` da shell, logo não encontraria o `node` do sistema;
 - **escolhe uma porta livre** a cada arranque, em vez da 4173 fixa, e só carrega a página quando o servidor responde;
 - **não deixa processos pendentes**: ao sair, manda `SIGTERM` ao servidor para o `exiftool` fechar em condições, e mata-o se não sair em meio segundo;
-- usa o **painel de pastas nativo** do macOS em vez do `osascript`, através de uma ponte do `WKWebView`. No modo browser (`npm start`) a ponte não existe e continua a usar-se o `osascript`.
+- usa o **painel de pastas nativo** do macOS em vez do `osascript`, através de uma ponte do `WKWebView`. No modo browser (`npm start`) a ponte não existe e continua a usar-se o `osascript`;
+- implementa as **caixas de diálogo do JavaScript** (`alert`, `confirm`, `prompt`) como folhas nativas. Isto não é opcional: sem um `WKUIDelegate` o `WKWebView` não mostra nada e o `window.confirm` devolve `false` em silêncio, o que faria a confirmação de apagar falhar sempre — o `Delete` e o `Cmd+Delete` pareciam não fazer nada. Verificado em A/B: sem delegado o `confirm` devolve `0`, com delegado devolve `1`.
+
+O encaminhamento das caixas de diálogo pode ser verificado sem cliques:
+
+```bash
+"dist/Photo EXIF Reviewer.app/Contents/MacOS/PhotoReviewer" --self-test
+```
+
+Nesse modo as caixas respondem sem UI e a app imprime o que o `window.confirm` devolveu, terminando a seguir. O `WKWebView` também fica com o Web Inspector ativo (`isInspectable`), para poderes inspecionar a página a partir do menu Desenvolvimento do Safari.
 
 Como é construída no teu Mac, **não fica em quarentena** e não aparecem os avisos do Gatekeeper. Vai assinada ad-hoc (`codesign --sign -`), que é o necessário para o macOS aceitar binários arm64 alterados depois de compilados.
 
@@ -147,12 +156,24 @@ Para parar a aplicação, volta ao Terminal e pressiona `Ctrl+C`.
 5. Usa **Só selecionadas** para fazer Anterior/Seguinte percorrer apenas a seleção.
 6. Faz duplo clique na fotografia principal ou numa fotografia em comparação para abrir o original em modo zoom. Usa a roda do rato para ampliar e arrasta para fazer pan.
 7. Usa **Mover para o Lixo** ou a tecla `Delete`/`Backspace` para rejeitar a fotografia atual. A app pede confirmação antes de mover os ficheiros.
-8. Usa **Ordenar** e **Só as melhores** para percorrer primeiro as candidatas com melhor pontuação. Ver a secção *Ajuda à escolha*.
-9. Usa **Agrupar** para apertar ou alargar o critério de semelhança, e **Grelha** para sobrepor a grelha dos terços à fotografia. A grelha é desenhada sobre a área realmente ocupada pela imagem, não sobre a caixa à volta, e a preferência fica guardada entre sessões.
+   Para eliminar a seleção inteira, usa **Eliminar selecionadas** ou `Shift+Delete` / `Shift+Backspace`, também no modo de comparação. Uma única confirmação lista as fotografias e os RAW associados. O Anular repõe uma fotografia de cada vez.
+8. Se te arrependeres, usa **Anular** ou `⌘Z` para repor do Lixo a última fotografia apagada, com os RAW que a acompanhavam. Ver a secção *Anular o apagar*.
+9. Usa **Ordenar** e **Só as melhores** para percorrer primeiro as candidatas com melhor pontuação. Ver a secção *Ajuda à escolha*.
+10. Usa **Agrupar** para apertar ou alargar o critério de semelhança, e **Grelha** para sobrepor a grelha dos terços à fotografia. A grelha é desenhada sobre a área realmente ocupada pela imagem, não sobre a caixa à volta, e a preferência fica guardada entre sessões.
 
 Ao mover um JPG/JPEG para o Lixo, a app procura na mesma pasta ficheiros RAW com o mesmo nome-base e move-os também. Por exemplo, ao eliminar `IMG_0123.JPG`, também será movido `IMG_0123.CR3`, se existir. A confirmação mostra os RAW encontrados antes da operação.
 
 Formatos RAW reconhecidos: ARW, CR2, CR3, DNG, NEF, NRW, ORF, PEF, RAF, RAW, RW2 e SRW.
+
+## Anular o apagar
+
+**Anular** na barra de ferramentas, ou `⌘Z`, repõe do Lixo a última fotografia apagada e os RAW que foram com ela. Funciona em cadeia, até 30 apagares atrás, do mais recente para o mais antigo. O atalho funciona mesmo no modo de comparação, onde as outras teclas estão desligadas.
+
+Isto exige saber **onde** cada ficheiro ficou no Lixo, e esse caminho não é possível adivinhar: em caso de colisão o macOS renomeia com um sufixo de hora, por exemplo `IMG_0248.JPG 21-28-59-013.JPG`. Nem o `macos-trash` nem o comando do sistema devolvem esse nome, e `~/.Trash` não pode ser listada por um processo sem permissões de automação. Por isso o apagar passa por um segundo auxiliar em Swift (`native/trashitem`) que usa `FileManager.trashItem(at:resultingItemURL:)` e devolve o caminho exato de destino.
+
+Sem esse auxiliar compilado, apagar continua a funcionar pela dependência `trash`, mas o **Anular** fica indisponível.
+
+O anular nunca sobrescreve: se entretanto apareceu na pasta um ficheiro com o mesmo nome, a operação é recusada com uma mensagem e a fotografia fica no Lixo, à espera. Todos os ficheiros são validados antes de qualquer um ser movido, para não ficar um conjunto meio reposto. E como mover para o Lixo e voltar preserva o `mtime`, as caches de análise e de previews continuam válidas — repor é praticamente instantâneo.
 
 A leitura da pasta não é recursiva: são apresentadas apenas as fotografias JPG/JPEG diretamente dentro da pasta escolhida.
 

@@ -86,7 +86,7 @@ await mkdir(macos, { recursive: true });
 await mkdir(destinoApp, { recursive: true });
 
 // O auxiliar do Vision tem de existir antes de ser copiado.
-await correr('node', [path.join(root, 'scripts', 'build-vision.mjs')]);
+await correr('node', [path.join(root, 'scripts', 'build-native.mjs')]);
 
 console.log('[app] a compilar a janela nativa');
 await correr('swiftc', ['-O', '-o', path.join(macos, 'PhotoReviewer'), path.join(root, 'app', 'PhotoReviewer.swift')]);
@@ -97,14 +97,16 @@ console.log('[app] a copiar o runtime Node');
 await cp(process.execPath, path.join(recursos, 'node'));
 
 console.log('[app] a copiar a aplicação e as dependências');
-for (const ficheiro of ['server.js', 'analysis.js', 'featureprint.js', 'package.json']) {
+for (const ficheiro of ['server.js', 'analysis.js', 'featureprint.js', 'trashitem.js', 'package.json']) {
   await cp(path.join(root, ficheiro), path.join(destinoApp, ficheiro));
 }
 for (const pasta of ['public', 'node_modules']) {
   await cp(path.join(root, pasta), path.join(destinoApp, pasta), { recursive: true });
 }
-await mkdir(path.join(destinoApp, 'vision'), { recursive: true });
-await cp(path.join(root, 'vision', 'featureprint'), path.join(destinoApp, 'vision', 'featureprint'));
+for (const [pasta, binario] of [['vision', 'featureprint'], ['native', 'trashitem']]) {
+  await mkdir(path.join(destinoApp, pasta), { recursive: true });
+  await cp(path.join(root, pasta, binario), path.join(destinoApp, pasta, binario));
+}
 
 console.log('[app] a gerar o ícone');
 await construirIcone();

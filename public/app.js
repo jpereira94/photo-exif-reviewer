@@ -12,6 +12,7 @@ const folderName = document.querySelector("#folder-name");
 // const previousButton = document.querySelector('#previous');
 // const nextButton = document.querySelector('#next');
 const deleteButton = document.querySelector("#delete");
+const deleteSelectedButton = document.querySelector("#delete-selected");
 const selectedOnlyButton = document.querySelector("#selected-only");
 const compareButton = document.querySelector("#compare");
 const clearSelectionButton = document.querySelector("#clear-selection");
@@ -44,6 +45,7 @@ const qualityFlags = document.querySelector("#quality-flags");
 const sensitivitySelect = document.querySelector("#sensitivity");
 const gridToggle = document.querySelector("#grid-toggle");
 const thirds = document.querySelector("#thirds");
+const undoButton = document.querySelector("#undo");
 
 let folder = "";
 let photos = [];
@@ -69,6 +71,8 @@ let sortMode = "folder";
 let bestOnly = false;
 let sensitivity = "normal";
 let showThirds = true;
+let canUndo = false;
+let deleting = false;
 const selectedNames = new Set();
 
 const partLabels = {
@@ -318,7 +322,11 @@ function updateControls() {
     : `${position + 1} de ${indices.length}${indices.length === photos.length ? "" : ` · ${photos.length} na pasta`}`;
   // previousButton.disabled = compareMode || position <= 0;
   // nextButton.disabled = compareMode || position < 0 || position === indices.length - 1;
-  deleteButton.disabled = compareMode;
+  deleteButton.disabled = deleting || compareMode;
+  deleteSelectedButton.disabled = deleting || selectedCount === 0;
+  deleteSelectedButton.textContent = selectedCount
+    ? `Eliminar selecionadas (${selectedCount})`
+    : "Eliminar selecionadas";
   selectedOnlyButton.disabled = selectedCount === 0;
   selectedOnlyButton.textContent = selectedCount
     ? `Só selecionadas (${selectedCount})`
@@ -328,6 +336,7 @@ function updateControls() {
   compareButton.textContent =
     selectedCount >= 2 ? `Comparar (${selectedCount})` : "Comparar";
   compareButton.setAttribute("aria-pressed", String(compareMode));
+  undoButton.disabled = !canUndo;
   clearSelectionButton.disabled = selectedCount === 0;
   selectionCount.textContent =
     selectedCount === 0
@@ -642,6 +651,7 @@ function toggleSelection(name) {
 function setFolder(data) {
   folder = data.folder;
   photos = data.photos;
+  canUndo = Boolean(data.canUndo);
   currentIndex = 0;
   currentRawFiles = [];
   selectedOnly = false;
@@ -819,55 +829,73 @@ function toggleSelectedOnly() {
   loadPhoto();
 }
 
-async function deletePhoto() {
-  const item = photos[currentIndex];
+async function deletePhoto(selection = false) {
+  const items = selection
+    ? photos.filter((item) => selectedNames.has(item.name))
+    : [photos[currentIndex]].filter(Boolean);
 
-  if (!item) {
+  if (deleting || !items.length) {
     return;
   }
 
-  const rawMessage = currentRawFiles.length
-    ? `\n\nTambém será movido para o Lixo: ${currentRawFiles.join(", ")}`
+  const rawFiles = [...new Set(items.flatMap((item) => item.rawFiles || []))];
+  const rawMessage = rawFiles.length
+    ? `\n\nTambém será movido para o Lixo: ${rawFiles.join(", ")}`
     : "";
+  const message = selection
+    ? `Mover ${items.length} fotografia(s) selecionada(s) para o Lixo?\n\n${items.map((item) => item.name).join("\n")}`
+    : `Mover “${items[0].name}” para o Lixo?`;
 
-  if (!window.confirm(`Mover “${item.name}” para o Lixo?${rawMessage}`)) {
+  if (!window.confirm(`${message}${rawMessage}`)) {
     return;
   }
 
-  deleteButton.disabled = true;
+  deleting = true;
+  reviewer.inert = true;
+  updateControls();
+  const deletedFiles = [];
 
   try {
-    const result = await request(`/api/photos/${currentIndex}`, {
-      method: "DELETE",
-    });
-    selectedNames.delete(item.name);
-    photos = result.photos;
-    const deletedFiles = [result.deleted, ...result.deletedRawFiles];
+    for (const item of items) {
+      // Os índices mudam a cada remoção; o nome identifica a fotografia seguinte.
+      const index = photos.findIndex((photoItem) => photoItem.name === item.name);
+      const result = await request(`/api/photos/${index}`, { method: "DELETE" });
+      canUndo = Boolean(result.canUndo);
+      selectedNames.delete(item.name);
+      photos = result.photos;
+      currentIndex = result.nextIndex ?? 0;
+      deletedFiles.push(result.deleted, ...result.deletedRawFiles);
+    }
+
     showToast(
       `Movido${deletedFiles.length > 1 ? "s" : ""} para o Lixo: ${deletedFiles.join(", ")}.`,
     );
-
-    if (result.nextIndex === null) {
-      updateView();
-      return;
-    }
-
-    currentIndex = result.nextIndex;
+  } catch (error) {
+    showToast(
+      `${deletedFiles.length ? `${deletedFiles.length} ficheiro(s) movido(s) para o Lixo. ` : ""}${error.message}`,
+      true,
+    );
+  } finally {
+    compareMode = false;
 
     if (selectedOnly) {
-      const firstSelected = photos.findIndex((photoItem) =>
-        selectedNames.has(photoItem.name),
-      );
+      const firstSelected = photos.findIndex((item) => selectedNames.has(item.name));
       selectedOnly = firstSelected !== -1;
       currentIndex = selectedOnly ? firstSelected : currentIndex;
     }
 
-    renderThumbnails();
-    await loadPhoto();
-  } catch (error) {
-    showToast(error.message, true);
-  } finally {
-    deleteButton.disabled = false;
+    updateView();
+
+    try {
+      if (photos.length) {
+        renderThumbnails();
+        await loadPhoto();
+      }
+    } finally {
+      deleting = false;
+      reviewer.inert = false;
+      updateControls();
+    }
   }
 }
 
@@ -931,7 +959,44 @@ bestOnlyButton.addEventListener("click", () => {
 
 // previousButton.addEventListener('click', previousPhoto);
 // nextButton.addEventListener('click', nextPhoto);
-deleteButton.addEventListener("click", deletePhoto);
+async function undoDelete() {
+  if (deleting || !canUndo) {
+    return;
+  }
+
+  undoButton.disabled = true;
+
+  try {
+    const result = await request("/api/undo", { method: "POST" });
+    photos = result.photos;
+    canUndo = result.canUndo;
+    compareMode = false;
+    bestOnly = false;
+
+    if (result.restoredIndex >= 0) {
+      currentIndex = result.restoredIndex;
+    }
+
+    showToast(
+      `Reposto${result.restored.length > 1 ? "s" : ""} do Lixo: ${result.restored.join(", ")}.`,
+    );
+    renderThumbnails();
+    await loadPhoto();
+    pollAnalysis();
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    updateControls();
+  }
+}
+
+// O menu Editar da app empacotada chama isto, para o ⌘Z funcionar tanto no
+// browser como na janela nativa.
+window.desfazerApagar = undoDelete;
+
+undoButton.addEventListener("click", undoDelete);
+deleteButton.addEventListener("click", () => deletePhoto());
+deleteSelectedButton.addEventListener("click", () => deletePhoto(true));
 photo.addEventListener("dblclick", () => openZoom(photos[currentIndex]));
 selectedOnlyButton.addEventListener("click", toggleSelectedOnly);
 compareButton.addEventListener("click", () => {
@@ -1035,7 +1100,45 @@ function isTextField(element) {
 }
 
 window.addEventListener("keydown", (event) => {
-  if (reviewer.hidden || compareMode || isTextField(document.activeElement)) {
+  if (deleting) {
+    event.preventDefault();
+    return;
+  }
+
+  // O anular vem antes das outras guardas: deve funcionar mesmo em modo de
+  // comparação, onde as restantes teclas estão desligadas.
+  const anular =
+    (event.key === "z" || event.key === "Z") &&
+    (event.metaKey || event.ctrlKey) &&
+    !event.shiftKey &&
+    !event.altKey;
+
+  if (anular) {
+    if (reviewer.hidden || isTextField(document.activeElement)) {
+      return;
+    }
+
+    event.preventDefault();
+    undoDelete();
+    return;
+  }
+
+  if (
+    !reviewer.hidden &&
+    !zoomViewer.open &&
+    !isTextField(document.activeElement) &&
+    (event.key === "Delete" || event.key === "Backspace") &&
+    event.shiftKey &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey
+  ) {
+    event.preventDefault();
+    if (!event.repeat) deletePhoto(true);
+    return;
+  }
+
+  if (reviewer.hidden || zoomViewer.open || compareMode || isTextField(document.activeElement)) {
     return;
   }
 
@@ -1061,6 +1164,6 @@ window.addEventListener("keydown", (event) => {
     }
   } else if (event.key === "Delete" || event.key === "Backspace") {
     event.preventDefault();
-    deletePhoto();
+    if (!event.repeat) deletePhoto();
   }
 });

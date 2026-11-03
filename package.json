@@ -6,9 +6,9 @@
   "description": "Aplica\u00e7\u00e3o local para rever fotografias e respetivos dados EXIF.",
   "scripts": {
     "start": "node server.js",
-    "build:vision": "node scripts/build-vision.mjs",
-    "postinstall": "node scripts/build-vision.mjs",
-    "build:app": "node scripts/build-app.mjs"
+    "build:native": "node scripts/build-native.mjs",
+    "build:app": "node scripts/build-app.mjs",
+    "postinstall": "node scripts/build-native.mjs"
   },
   "engines": {
     "node": ">=18"
